@@ -86,6 +86,12 @@ app.get(
         id: true,
         title: true,
         secret: false,
+        creator: {
+          select: {
+            id: true,
+            username: true,
+          },
+        },
       },
     });
 
@@ -178,6 +184,60 @@ app.post(
     res.status(201).json({ data: JoinThread });
   })
 );
+
+app.delete("/threads/:id", async (req, res) => {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  const { id } = req.params;
+
+  const thread = await db.thread.findUnique({
+    where: {
+      id: Number(id),
+    },
+  });
+
+  if (!thread) {
+    res.status(404).json({ message: "Thread not found" });
+    return;
+  }
+
+  if (thread.creatorId !== userId) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  const threadId = Number(id);
+
+  await db.$transaction(async () => {
+    // Delete all messages of the thread
+    await db.message.deleteMany({
+      where: {
+        threadId,
+      },
+    });
+
+    // Delete all thread members
+    await db.threadMember.deleteMany({
+      where: {
+        threadId,
+      },
+    });
+
+    // Delete the thread
+    const deleteThread = await db.thread.delete({
+      where: {
+        id: threadId,
+      },
+    });
+  });
+
+  res.status(200).json({ message: "Thread deleted" });
+});
 
 app.get("/threads/:id/messages", async (req, res) => {
   const userId = req.session.userId;

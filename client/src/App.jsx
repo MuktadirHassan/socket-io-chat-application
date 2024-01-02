@@ -234,6 +234,7 @@ function LoginPage() {
     }).then((res) => {
       if (res.data) {
         localStorage.setItem("isAuthenticated", true);
+        localStorage.setItem("user", JSON.stringify(res.data));
         setIsAuthenticated(true);
         navigate("/");
         alert("Successfully logged in!");
@@ -385,13 +386,37 @@ const Sidebar = () => {
         Join Thread
       </button>
       {threads.map((thread) => (
-        <Link
-          key={thread.id}
-          to={`/thread/${thread.id}`}
-          className="p-4 hover:bg-gray-300"
-        >
-          {thread.title}
-        </Link>
+        <div className="flex" key={thread.id}>
+          <div className="p-4 hover:bg-gray-300">{thread.id}</div>
+          <Link
+            key={thread.id}
+            to={`/thread/${thread.id}`}
+            className="p-4 hover:bg-gray-300 flex-grow"
+          >
+            {thread.title}
+          </Link>
+          {localStorage.getItem("user") &&
+            JSON.parse(localStorage.getItem("user")).id ===
+              thread.creator.id && (
+              <button
+                className="p-4 hover:bg-gray-300"
+                onClick={() => {
+                  fetcher(`${API_URL}/threads/${thread.id}`, {
+                    method: "DELETE",
+                  }).then((res) => {
+                    if (res.data) {
+                      alert("Successfully deleted thread!");
+                      window.location.reload();
+                    } else {
+                      alert(res.message);
+                    }
+                  });
+                }}
+              >
+                Delete
+              </button>
+            )}
+        </div>
       ))}
     </div>
   );
