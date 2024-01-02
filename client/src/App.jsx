@@ -88,29 +88,28 @@ function App() {
 
 function Thread() {
   const { threadId } = useParams();
+  const scrollRef = useRef();
 
   const [newMessage, setNewMessage] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      content: "This is a message",
-      sender: "John Doe",
-      senderId: 1,
-      timestamp: "2021-09-01T12:00:00Z",
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages.length]);
 
   useEffect(() => {
     const socket = io("ws://localhost:5000", {
       withCredentials: true,
     });
     const abortController = new AbortController();
+
     // load old messages
     fetcher(`${API_URL}/threads/${threadId}/messages`, {
       signal: abortController.signal,
     }).then((res) => {
       if (res && res.data) {
-        // setMessages(res.data);
         const messages = res.data.map((message) => ({
           ...message,
           timestamp: new Date(message.timestamp).toLocaleString(),
@@ -137,6 +136,9 @@ function Thread() {
           };
 
           setMessages((messages) => [...messages, newmsg]);
+
+          // Scroll to the bottom after receiving a new message
+          scrollRef.current.scrollIntoView({ behavior: "smooth" });
         }
       });
     });
@@ -170,19 +172,21 @@ function Thread() {
   };
 
   return (
-    <div className="flex flex-col flex-grow">
-      <h1 className="text-4xl font-bold mb-8">Thread {threadId}</h1>
+    <div className="flex flex-col flex-grow h-full">
+      <h1 className="text-4xl font-bold">Thread {threadId}</h1>
       <div className="flex flex-col overflow-auto">
         {messages.map((message) => (
-          <div key={message.id} className="bg-gray-200 p-2 mb-2">
+          <div key={message.id} className="bg-gray-200 p-4">
             <p className="text-lg">{message.content}</p>
-            <p className="text-sm text-gray-500">
-              {message.sender} - {message.timestamp}
-            </p>
+            <div className="flex justify-between items-center mt-1">
+              <p className="text-sm text-gray-500">{message.sender}</p>
+              <p className="text-sm text-gray-500">{message.timestamp}</p>
+            </div>
           </div>
         ))}
+        <div ref={scrollRef} />
       </div>
-      <form onSubmit={handleSendMessage} className="mt-4">
+      <form onSubmit={handleSendMessage}>
         <input
           type="text"
           placeholder="Type your message..."

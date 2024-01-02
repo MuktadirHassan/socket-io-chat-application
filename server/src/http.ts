@@ -227,6 +227,9 @@ app.get("/threads/:id/messages", async (req, res) => {
         },
       },
     },
+    orderBy: {
+      timestamp: "asc",
+    },
   });
 
   res.status(200).json({ data: messages });
