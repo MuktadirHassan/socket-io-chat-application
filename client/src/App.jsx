@@ -1,4 +1,4 @@
-import { useEffect, useState, createContext, useContext } from "react";
+import { useEffect, useState, createContext, useContext, useRef } from "react";
 import {
   BrowserRouter as Router,
   Link,
@@ -78,15 +78,14 @@ function App() {
           <Route path="/" element={<ProtectedLayout />}>
             <Route path="/thread/:threadId" element={<Thread />} />
             <Route path="/thread/create" element={<CreateThread />} />
+            <Route path="/thread/join" element={<JoinThread />} />
           </Route>
         </Routes>
       </Router>
     </AuthProvider>
   );
 }
-const socket = io("ws://localhost:5000", {
-  withCredentials: true,
-});
+
 function Thread() {
   const { threadId } = useParams();
 
@@ -102,6 +101,9 @@ function Thread() {
   ]);
 
   useEffect(() => {
+    const socket = io("ws://localhost:5000", {
+      withCredentials: true,
+    });
     const abortController = new AbortController();
     // load old messages
     fetcher(`${API_URL}/threads/${threadId}/messages`, {
@@ -119,23 +121,37 @@ function Thread() {
         setMessages(messages);
       }
     });
-    // client-side
+
     socket.on("connect", () => {
       socket.emit("join", threadId);
-    });
 
-    socket.on("message", (message) => {
-      console.log(message);
+      socket.on("message", (message) => {
+        console.log(message);
+
+        if (message.type === "text") {
+          const newmsg = {
+            ...message,
+            timestamp: new Date(message.timestamp).toLocaleString(),
+            sender: message.sender.username,
+            senderId: message.sender.id,
+          };
+
+          setMessages((messages) => [...messages, newmsg]);
+        }
+      });
     });
 
     return () => {
       abortController.abort();
-      socket.emit("leave", threadId);
-      socket.off("message");
+      socket.disconnect();
     };
   }, [threadId]);
 
   const handleSendMessage = (e) => {
+    const socket = io("ws://localhost:5000", {
+      withCredentials: true,
+    });
+
     e.preventDefault();
     const newMessageObj = {
       content: newMessage,
@@ -156,7 +172,7 @@ function Thread() {
   return (
     <div className="flex flex-col flex-grow">
       <h1 className="text-4xl font-bold mb-8">Thread {threadId}</h1>
-      <div className="flex flex-col">
+      <div className="flex flex-col overflow-auto">
         {messages.map((message) => (
           <div key={message.id} className="bg-gray-200 p-2 mb-2">
             <p className="text-lg">{message.content}</p>
@@ -356,6 +372,14 @@ const Sidebar = () => {
       >
         Create Thread
       </button>
+      <button
+        className="p-4 hover:bg-gray-300"
+        onClick={() => {
+          navigate("/thread/join");
+        }}
+      >
+        Join Thread
+      </button>
       {threads.map((thread) => (
         <Link
           key={thread.id}
@@ -415,6 +439,60 @@ const CreateThread = () => {
         />
         <button type="submit" className="p-2 bg-blue-500 text-white rounded">
           Create
+        </button>
+      </form>
+    </div>
+  );
+};
+
+const JoinThread = () => {
+  const [secret, setSecret] = useState("");
+  const [threadId, setThreadId] = useState("");
+  const navigate = useNavigate();
+
+  const joinThread = (e) => {
+    e.preventDefault();
+    if (threadId === "" || secret === "") {
+      alert("Please fill out all fields");
+    }
+
+    fetcher(`${API_URL}/threads/${threadId}/join`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        secret,
+      }),
+    }).then((res) => {
+      if (res.data) {
+        alert("Successfully joined thread!");
+        navigate(`/thread/${threadId}`);
+      } else {
+        alert(res.message);
+      }
+    });
+  };
+
+  return (
+    <div className="flex flex-col flex-grow p-4">
+      <h1 className="text-4xl font-bold mb-8">Join Thread</h1>
+      <form className="flex flex-col w-64" onSubmit={joinThread}>
+        <input
+          type="text"
+          placeholder="Thread ID"
+          className="p-2 border border-gray-400 rounded mb-4"
+          onChange={(e) => setThreadId(e.target.value)}
+        />
+        <p className="mb-4">Ask the thread owner for the secret</p>
+        <input
+          type="text"
+          placeholder="Secret"
+          className="p-2 border border-gray-400 rounded mb-4"
+          onChange={(e) => setSecret(e.target.value)}
+        />
+        <button type="submit" className="p-2 bg-blue-500 text-white rounded">
+          Join
         </button>
       </form>
     </div>

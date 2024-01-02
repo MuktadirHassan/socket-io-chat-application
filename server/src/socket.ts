@@ -41,30 +41,39 @@ io.on("connection", (socket: Socket) => {
   // Join a threadId
   socket.on(REALTIME_EVENTS.join, (threadId: string) => {
     socket.join(threadId);
-    io.to(threadId).emit(REALTIME_EVENTS.message, "User joined the thread");
+    logger.trace(`User ${session.userId} joined thread ${threadId}`);
   });
 
   // Leave the threadId
   socket.on(REALTIME_EVENTS.leave, (threadId: string) => {
     socket.leave(threadId);
-    io.to(session.threadId).emit(
-      REALTIME_EVENTS.message,
-      "User left the thread"
-    );
+    logger.trace(`User ${session.userId} left thread ${threadId}`);
   });
 
   // Send a message to threadId
   socket.on(
     REALTIME_EVENTS.message,
-    (message: { content: string; timestamp: string; threadId: number }) => {
+    async (message: {
+      content: string;
+      timestamp: string;
+      threadId: string;
+    }) => {
+      console.log(message, "Recieved message");
+
       // save message to database
-      const data = createMessage({
+      const data = await createMessage({
         content: message.content,
         timestamp: message.timestamp,
         threadId: Number(message.threadId),
         userId: Number(session.userId),
       });
-      io.to(session.threadId).emit(REALTIME_EVENTS.message, data);
+
+      console.log(data, "Broadcasting message");
+
+      io.to(message.threadId).emit(REALTIME_EVENTS.message, {
+        ...data,
+        type: "text",
+      });
     }
   );
 });

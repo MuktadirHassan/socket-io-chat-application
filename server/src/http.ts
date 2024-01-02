@@ -308,6 +308,17 @@ export const createMessage = async ({
       threadId: threadId,
       senderId: userId,
     },
+    select: {
+      id: true,
+      content: true,
+      timestamp: true,
+      sender: {
+        select: {
+          id: true,
+          username: true,
+        },
+      },
+    },
   });
 
   return message;
