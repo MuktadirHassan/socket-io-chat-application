@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { useState } from "react";
+import { useEffect, useState, createContext, useContext } from "react";
 import {
   BrowserRouter as Router,
   Link,
@@ -7,35 +6,87 @@ import {
   Route,
   Outlet,
   useParams,
+  Navigate,
+  useNavigate,
 } from "react-router-dom";
 import { io } from "socket.io-client";
-const socket = io("ws://localhost:5001");
+const API_URL = "http://localhost:5000";
+
+const fetcher = async (url, options) => {
+  try {
+    const res = await fetch(url, {
+      ...options,
+      credentials: "include",
+    });
+    const data = await res.json();
+    return data;
+  } catch (error) {
+    console.log(error);
+  }
+};
+
+const authContext = createContext();
+
+const useAuth = () => {
+  const context = useContext(authContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+
+  return context;
+};
+
+// eslint-disable-next-line react/prop-types
+const AuthProvider = ({ children }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  return (
+    <authContext.Provider value={{ isAuthenticated, setIsAuthenticated }}>
+      {children}
+    </authContext.Provider>
+  );
+};
+
+function ProtectedLayout() {
+  const { isAuthenticated } = useAuth();
+
+  return (
+    <>
+      {!isAuthenticated ? (
+        <Navigate to="/login" />
+      ) : (
+        <div className="bg-gray-100 h-screen">
+          <div className="flex flex-row bg-gray-100 p-20 h-full">
+            <Sidebar />
+            <div className="flex flex-col flex-grow">
+              <Outlet />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<ThreadLayout />}>
-          <Route path="/thread/:threadId" element={<Thread />} />
-        </Route>
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/" element={<ProtectedLayout />}>
+            <Route path="/thread/:threadId" element={<Thread />} />
+            <Route path="/thread/create" element={<CreateThread />} />
+          </Route>
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
-
-function ThreadLayout() {
-  return (
-    <div className="bg-gray-100 h-screen">
-      <div className="flex flex-row bg-gray-100 p-20 h-full">
-        <Sidebar />
-        <div className="flex flex-col flex-grow">
-          <Outlet />
-        </div>
-      </div>
-    </div>
-  );
-}
-
+const socket = io("ws://localhost:5000", {
+  withCredentials: true,
+});
 function Thread() {
   const { threadId } = useParams();
 
@@ -45,53 +96,60 @@ function Thread() {
       id: 1,
       content: "This is a message",
       sender: "John Doe",
-      timestamp: "2021-09-01T12:00:00Z",
-    },
-    {
-      id: 2,
-      content: "This is another message",
-      sender: "Jane Doe",
-      timestamp: "2021-09-01T12:00:00Z",
-    },
-    {
-      id: 3,
-      content: "This is a third message",
-      sender: "John Doe",
-      timestamp: "2021-09-01T12:00:00Z",
-    },
-    {
-      id: 4,
-      content: "This is a fourth message",
-      sender: "Jane Doe",
+      senderId: 1,
       timestamp: "2021-09-01T12:00:00Z",
     },
   ]);
 
   useEffect(() => {
+    const abortController = new AbortController();
+    // load old messages
+    fetcher(`${API_URL}/threads/${threadId}/messages`, {
+      signal: abortController.signal,
+    }).then((res) => {
+      if (res && res.data) {
+        // setMessages(res.data);
+        const messages = res.data.map((message) => ({
+          ...message,
+          timestamp: new Date(message.timestamp).toLocaleString(),
+          sender: message.sender.username,
+          senderId: message.sender.id,
+        }));
+
+        setMessages(messages);
+      }
+    });
     // client-side
     socket.on("connect", () => {
       socket.emit("join", threadId);
     });
 
-    socket.on("disconnect", () => {
-      console.log(socket.id); // undefined
+    socket.on("message", (message) => {
+      console.log(message);
     });
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
+      abortController.abort();
+      socket.emit("leave", threadId);
+      socket.off("message");
     };
   }, [threadId]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
     const newMessageObj = {
-      id: messages.length + 1,
       content: newMessage,
-      sender: "John Doe", // Assuming the sender is always the same for simplicity
       timestamp: new Date().toISOString(),
+      threadId,
     };
-    setMessages([...messages, newMessageObj]);
+
+    if (newMessage === "") {
+      alert("Please fill out all fields");
+      return;
+    }
+
+    socket.emit("message", newMessageObj);
+
     setNewMessage("");
   };
 
@@ -130,9 +188,39 @@ function Thread() {
 function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const { setIsAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const auth = localStorage.getItem("isAuthenticated");
+    if (auth) {
+      navigate("/");
+      setIsAuthenticated(true);
+    }
+  }, [navigate, setIsAuthenticated]);
 
   const handleLogin = (e) => {
     e.preventDefault();
+    if (username === "" || password === "") {
+      alert("Please fill out all fields");
+    }
+
+    fetcher(`${API_URL}/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    }).then((res) => {
+      if (res.data) {
+        localStorage.setItem("isAuthenticated", true);
+        setIsAuthenticated(true);
+        navigate("/");
+        alert("Successfully logged in!");
+      } else {
+        alert(res.message);
+      }
+    });
   };
 
   return (
@@ -157,61 +245,117 @@ function LoginPage() {
           Login
         </button>
       </form>
+
+      <p className="mt-4">
+        Don&apos;t have an account?{" "}
+        <Link to="/register" className="text-blue-500">
+          Register
+        </Link>
+      </p>
     </div>
   );
 }
 
-const threads = [
-  {
-    id: 1,
-    title: "CSE 310",
-    description: "This is a thread for CSE 310",
-  },
-  {
-    id: 2,
-    title: "CSE 320",
-    description: "This is a thread for CSE 320",
-  },
-  {
-    id: 3,
-    title: "CSE 330",
-    description: "This is a thread for CSE 330",
-  },
-  {
-    id: 4,
-    title: "CSE 340",
-    description: "This is a thread for CSE 340",
-  },
-  {
-    id: 5,
-    title: "CSE 350",
-    description: "This is a thread for CSE 350",
-  },
-  {
-    id: 6,
-    title: "CSE 360",
-    description: "This is a thread for CSE 360",
-  },
-  {
-    id: 7,
-    title: "CSE 370",
-    description: "This is a thread for CSE 370",
-  },
-  {
-    id: 8,
-    title: "CSE 380",
-    description: "This is a thread for CSE 380",
-  },
-  {
-    id: 9,
-    title: "CSE 390",
-    description: "This is a thread for CSE 390",
-  },
-];
+function Register() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleRegister = (e) => {
+    e.preventDefault();
+    if (username === "" || password === "") {
+      alert("Please fill out all fields");
+    }
+
+    fetcher(`${API_URL}/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    })
+      .then((res) => {
+        if (res.success) {
+          alert("Successfully registered!");
+        } else {
+          alert(res.message);
+        }
+      })
+      .catch((err) => {
+        console.log(err);
+      });
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen">
+      <h1 className="text-4xl font-bold mb-8">Register</h1>
+      <form className="flex flex-col w-64" onSubmit={handleRegister}>
+        <input
+          type="text"
+          placeholder="Username"
+          className="p-2 border border-gray-400 rounded mb-4"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          className="p-2 border border-gray-400 rounded mb-4"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <button type="submit" className="p-2 bg-blue-500 text-white rounded">
+          Register
+        </button>
+      </form>
+
+      <p className="mt-4">
+        Already have an account?{" "}
+        <Link to="/login" className="text-blue-500">
+          Login
+        </Link>
+      </p>
+    </div>
+  );
+}
 
 const Sidebar = () => {
+  const { setIsAuthenticated, isAuthenticated } = useAuth();
+  const [threads, setThreads] = useState([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetcher(`${API_URL}/threads`).then((res) => {
+      if (!res.data) {
+        alert(res.message);
+        return;
+      }
+      setThreads(res.data);
+    });
+  }, []);
+
   return (
     <div className="flex flex-col w-64 bg-gray-200">
+      <h1 className="text-2xl font-bold p-4">Threads</h1>
+      {isAuthenticated && (
+        <button
+          className="p-4 hover:bg-gray-300"
+          onClick={() => {
+            localStorage.removeItem("isAuthenticated");
+            setIsAuthenticated(false);
+            navigate("/login");
+          }}
+        >
+          Logout
+        </button>
+      )}
+      <button
+        className="p-4 hover:bg-gray-300"
+        onClick={() => {
+          navigate("/thread/create");
+        }}
+      >
+        Create Thread
+      </button>
       {threads.map((thread) => (
         <Link
           key={thread.id}
@@ -221,6 +365,58 @@ const Sidebar = () => {
           {thread.title}
         </Link>
       ))}
+    </div>
+  );
+};
+
+const CreateThread = () => {
+  const [title, setTitle] = useState("");
+  const [secret, setSecret] = useState("");
+  const createThread = (e) => {
+    e.preventDefault();
+    if (title === "" || secret === "") {
+      alert("Please fill out all fields");
+    }
+
+    fetcher(`${API_URL}/threads`, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title,
+        secret,
+      }),
+    }).then((res) => {
+      if (res.data) {
+        alert("Successfully created thread!");
+      } else {
+        alert(res.message);
+      }
+    });
+  };
+
+  return (
+    <div className="flex flex-col flex-grow p-4">
+      <h1 className="text-4xl font-bold mb-8">Create Thread</h1>
+      <form className="flex flex-col w-64" onSubmit={createThread}>
+        <input
+          type="text"
+          placeholder="Title"
+          className="p-2 border border-gray-400 rounded mb-4"
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <input
+          type="text"
+          placeholder="Secret"
+          className="p-2 border border-gray-400 rounded mb-4"
+          onChange={(e) => setSecret(e.target.value)}
+        />
+        <button type="submit" className="p-2 bg-blue-500 text-white rounded">
+          Create
+        </button>
+      </form>
     </div>
   );
 };

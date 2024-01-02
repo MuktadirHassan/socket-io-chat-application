@@ -1,7 +1,6 @@
 import env from "./config/env";
-import app from "./http";
 import { logger } from "./config/logger";
-import "./socket";
+import app from "./socket";
 
 const server = app.listen(env.PORT, () => {
   logger.info(`Server running at ${env.PORT}`);
